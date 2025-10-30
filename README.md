@@ -34,15 +34,15 @@ Pacoloco can be used with docker.
 You can get a prebuilt image from GitHub's [container registry](https://github.com/anatol/pacoloco/pkgs/container/pacoloco) (see also sidebar).
 Currently the images are built for `amd64` and ARM (`arm64`, `armv7`) architectures.
 ```sh
-docker pull ghcr.io/anatol/pacoloco
+docker pull ghcr.io/DennisRasey/pacoloco
 ```
 Available tags are: `latest` = git master and any git tags.
 
 
 You can also build it yourself:
 ```sh
-$ git clone https://github.com/anatol/pacoloco && cd pacoloco
-$ docker build -t ghcr.io/anatol/pacoloco .
+$ git clone https://github.com/DennisRasey/pacoloco && cd pacoloco
+$ docker build -t ghcr.io/DennisRasey/pacoloco .
 ```
 
 Run it like this:
@@ -65,9 +65,9 @@ services:
 #   user: 1000:1000
     container_name: pacoloco
 #   to pull the image from github's registry:
-    image: ghcr.io/anatol/pacoloco
+    image: ghcr.io/DennisRasey/pacoloco
 #   or replace it for for self-building with:
-#    build: https://github.com/anatol/pacoloco.git
+#    build: https://github.com/DennisRasey/pacoloco.git
     ports:
       - "9129:9129"
     volumes:

@@ -14,9 +14,9 @@ RUN go test -ldflags="-s -w"
 FROM common AS build
 RUN go build -ldflags="-s -w"
 
-FROM alpine:3.21 AS executable
+FROM alpine:3.22.1 AS executable
 
-RUN apk add tzdata
+RUN apk add --no-cache tzdata
 
 WORKDIR /pacoloco
 
