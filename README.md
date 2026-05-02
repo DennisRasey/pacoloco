@@ -1,10 +1,26 @@
 # Pacoloco - caching proxy server for pacman
 
+[![Build Status](https://github.com/anatol/pacoloco/actions/workflows/push.yaml/badge.svg)](https://github.com/anatol/pacoloco/actions/workflows/push.yaml)
+![Go Version](https://img.shields.io/github/go-mod/go-version/anatol/pacoloco)
+[![License](https://img.shields.io/github/license/anatol/pacoloco)](https://github.com/anatol/pacoloco/blob/master/LICENSE)
+
 Pacoloco is a web server that acts if it was an Arch Linux pacman repository.
 Every time pacoloco server gets a request from user it downloads this file from
 real Arch Linux mirror and bypasses it to the user. Additionally pacoloco
 saves this file to local filesystem cache and serves it to the future users.
 It also allows to prefetch updates of the most recently used packages.
+
+## Table of Contents
+
+- [How does it help?](#how-does-it-help)
+- [Install](#install)
+- [Build from sources](#build-from-sources)
+- [Configure](#configure)
+- [Monitoring](#monitoring)
+- [Handling multiple architectures](#handling-multiple-architectures)
+- [Troubleshooting](#troubleshooting)
+- [Security Considerations](#security-considerations)
+- [Credits](#credits)
 
 ## How does it help?
 
@@ -57,7 +73,6 @@ You need to provide paths or volumes to store application data.
 Alternatively, you can use docker-compose:
 ```yaml
 ---
-version: "3.8"
 services:
   pacoloco:
 #   if a specific user id is provided, you have to make sure
@@ -81,11 +96,26 @@ services:
 
 ## Build from sources
 
+Requires Go 1.25.0 or later.
+
+```sh
+go build          # build the binary
+go test ./...     # run tests
+```
+
 Optionally you can build the binary from sources using `go build` command.
 
 ## Configure
 
-The server configuration is located at `/etc/pacoloco.yaml`. Here is an example how the config file looks like:
+The server configuration default location is `/etc/pacoloco.yaml`.
+
+Changing the config file location can be done with the `--config` argument when launching pacoloco, like this:
+
+```sh
+$ pacoloco --config /some/location/config.yaml
+```
+
+Here is an example how the config file looks like:
 
 ```yaml
 port: 9129
@@ -106,6 +136,9 @@ repos:
     mirrorlist: /etc/pacman.d/reflector_mirrorlist # Be careful! Check that pacoloco URL is NOT included in that file!
 http_proxy: http://foo.company.com:8989 # Enable this only if you have pacoloco running behind a proxy
 user_agent: Pacoloco/1.2
+tls: # optional section, add it if you want to enable tls for the server
+  key:  privatekey.pem
+  cert: certificate.pem
 prefetch: # optional section, add it if you want to enable prefetching
   cron: 0 0 3 * * * * # standard cron expression (https://en.wikipedia.org/wiki/Cron#CRON_expression) to define how frequently prefetch, see https://github.com/gorhill/cronexpr#implementation for documentation.
   ttl_unaccessed_in_days: 30  # defaults to 30, set it to a higher value than the number of consecutive days you don't update your systems
@@ -121,9 +154,12 @@ prefetch: # optional section, add it if you want to enable prefetching
 * `repos` is a list of repositories to mirror. Each repo needs `name` and url of its Arch mirrors. Note that url can be specified either with `url` or `urls` properties, one and only one can be used for each repo configuration. Each repo could have its own `http_proxy`, which would shadow the global `http_proxy` (see below).
 * `http_proxy` is only to be used if you have pacoloco running behind a proxy
 * `user_agent` user agent used to fetch the files from repositories. Default value is `Pacoloco/1.2`.
+* The `tls` section allows to enable tls encryption for the server. Both, the `key` and the `cert`ificate have to be provided and readable.
 * The `prefetch` section allows to enable packages prefetching. Comment it out to disable it.
 * To test out if the cron value does what you'd expect to do, check cronexpr [implementation](https://github.com/gorhill/cronexpr#implementation) or [test it](https://play.golang.org/p/IK2hrIV7tUk)
 * For what regards `mirrorlist`, be sure that pacoloco itself is NOT included in the chosen `mirrorlist` file. It can be integrated with reflector too, either by changing reflector's output path or by including pacoloco directly for standard repos in `/etc/pacman.conf` (e.g. adding a `Server=...` entry or a custom mirrorlist file which includes only pacoloco URL).
+
+For a detailed reference of all configuration options, see [docs/configuration.md](docs/configuration.md).
 
 With the example configured above `http://YOURSERVER:9129/repo/archlinux` looks exactly like an Arch pacman mirror.
 For example a request to `http://YOURSERVER:9129/repo/archlinux/core/os/x86_64/openssh-8.2p1-3-x86_64.pkg.tar.zst` will be served with file content from `http://mirror.lty.me/archlinux/core/os/x86_64/openssh-8.2p1-3-x86_64.pkg.tar.zst`
@@ -151,6 +187,31 @@ Server = http://yourpacoloco:9129/repo/archlinux/$repo/os/$arch
 ```
 
 That's it. Since now pacman requests will be proxied through our pacoloco server.
+
+## Monitoring
+
+Pacoloco exposes Prometheus metrics at the `/metrics` endpoint.
+
+### Available Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `pacoloco_cache_requests_total` | Counter | `repo` | Total number of incoming requests |
+| `pacoloco_cache_hits_total` | Counter | `repo` | Requests served from cache |
+| `pacoloco_cache_miss_total` | Counter | `repo` | Requests that required upstream download |
+| `pacoloco_cache_errors_total` | Counter | `repo` | Errors while serving cached files |
+| `pacoloco_cache_size_bytes` | Gauge | `repo` | Current cache size in bytes |
+| `pacoloco_cache_packages_total` | Gauge | `repo` | Number of cached packages |
+| `pacoloco_downloaded_files_total` | Counter | `repo`, `upstream`, `status` | Files downloaded from upstream mirrors |
+
+### Prometheus Scrape Configuration
+
+```yaml
+scrape_configs:
+  - job_name: 'pacoloco'
+    static_configs:
+      - targets: ['yourpacoloco:9129']
+```
 
 ## Handling multiple architectures
 
@@ -192,6 +253,49 @@ Server = http://yourpacoloco:9129/repo/archlinux_$arch/$arch/$repo
 ```
 
 Please note that `archlinux_$arch` is the repo name in pacoloco.yaml.
+
+## Troubleshooting
+
+### Cache directory permissions
+
+Pacoloco requires read and write access to the cache directory. If you see an error like `directory /var/cache/pacoloco does not exist or isn't writable`, ensure:
+```sh
+sudo mkdir -p /var/cache/pacoloco
+sudo chown pacoloco:pacoloco /var/cache/pacoloco
+```
+
+### Mirrorlist circular reference
+
+If pacoloco's own URL is included in a mirrorlist file used by a repo, it will create an infinite loop. Always exclude the pacoloco server from mirrorlist files it consumes.
+
+### TLS errors
+
+When using TLS, both `cert` and `key` files must exist and be readable by the pacoloco process. Check file permissions:
+```sh
+ls -la /path/to/cert.pem /path/to/key.pem
+```
+
+### Cron expression syntax
+
+Pacoloco uses a 7-field cron expression (second, minute, hour, day-of-month, month, day-of-week, year). This differs from the standard 5-field cron. See the [cronexpr documentation](https://github.com/gorhill/cronexpr#implementation) for details.
+
+### Log timestamps
+
+By default, pacoloco logs include file/line information. To switch to timestamps, add to your config:
+```yaml
+set_timestamp_to_logs: true
+```
+
+### Purge interval
+
+The `purge_files_after` value is in seconds and must be at least 600 (10 minutes) if enabled. Setting it to `0` disables purging entirely.
+
+## Security Considerations
+
+- **Network binding**: By default, pacoloco listens on all interfaces. In production, consider setting `address` to bind only to a specific interface (e.g., `127.0.0.1` or a LAN address).
+- **TLS file permissions**: Ensure TLS private key files are readable only by the pacoloco user (`chmod 600`).
+- **Proxy credentials**: If using `http_proxy` with credentials, be aware these are stored in plaintext in the config file. Restrict config file permissions accordingly.
+- **Signature verification**: Pacoloco does not verify package signatures; it delegates this to the pacman client. Ensure clients have signature verification enabled.
 
 ## Credits
 
