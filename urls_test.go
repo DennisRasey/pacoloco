@@ -39,6 +39,40 @@ var expectedURLs = []string{
 	`http://another.test.co.uk/archlinux/`,
 }
 
+func TestGetUrlsSingleURL(t *testing.T) {
+	repo := &Repo{URL: "http://mirror.example.com/archlinux"}
+	urls := repo.getUrls()
+	require.Equal(t, []string{"http://mirror.example.com/archlinux"}, urls)
+}
+
+func TestGetUrlsMultipleURLs(t *testing.T) {
+	repo := &Repo{URLs: []string{
+		"http://mirror1.example.com/archlinux",
+		"http://mirror2.example.com/archlinux",
+	}}
+	urls := repo.getUrls()
+	require.Equal(t, []string{
+		"http://mirror1.example.com/archlinux",
+		"http://mirror2.example.com/archlinux",
+	}, urls)
+}
+
+func TestMirrorlistCaching(t *testing.T) {
+	temp := t.TempDir()
+	tmpMirrorfile := path.Join(temp, "tmpMirrorFile")
+	require.NoError(t, os.WriteFile(tmpMirrorfile, []byte(mirrorlist), 0o644))
+
+	repo := &Repo{Mirrorlist: tmpMirrorfile}
+
+	// First call should parse the mirrorlist
+	urls := repo.getUrls()
+	require.Equal(t, expectedURLs, urls)
+
+	// Second immediate call should return cached results (within 5s check interval)
+	urls2 := repo.getUrls()
+	require.Equal(t, expectedURLs, urls2)
+}
+
 func TestParseMirrorlist(t *testing.T) {
 	temp := t.TempDir()
 	tmpMirrorfile := path.Join(temp, "tmpMirrorFile")
@@ -60,7 +94,7 @@ func TestGetCurrentURLs(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(tmpMirrorfile, []byte(mirrorlist), 0o644))
 
-	config := parseConfig([]byte(`
+	config, err := parseConfig([]byte(`
 cache_dir: ` + temp + `
 purge_files_after: 2592000 # 3600 * 24 * 30days
 download_timeout: 200
@@ -70,6 +104,7 @@ repos:
     mirrorlist: ` + tmpMirrorfile + `
 
 `))
+	require.NoError(t, err)
 	archTest := config.Repos["archTest"]
 	require.Equal(t, expectedURLs, archTest.getUrls())
 
@@ -86,12 +121,13 @@ func TestEmptyMirrorlist(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(tmpMirrorfile, []byte(""), 0o644))
 
-	config := parseConfig([]byte(`
+	config, err := parseConfig([]byte(`
 cache_dir: ` + temp + `
 repos:
   archTest:
     mirrorlist: ` + tmpMirrorfile + `
 `))
+	require.NoError(t, err)
 	archTest := config.Repos["archTest"]
 	urls, err := archTest.getMirrorlistURLs()
 	require.Error(t, err)
